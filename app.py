@@ -6,6 +6,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from audiorecorder import audiorecorder
 import io
+from datetime import date # dateを扱うためにインポート
 
 # --- 1. 初期設定 & 環境変数読み込み ---
 
@@ -131,6 +132,18 @@ def check_password():
 
 # 修正箇所: main_app 関数の中
 def main_app():
+    # 1. 利用期限を設定 (2025年9月30日)
+    expiration_date = date(2025, 9, 30)
+    
+    # 2. 今日の日付を取得
+    today = date.today()
+    
+    # 3. 今日の日付が利用期限を過ぎていないかチェック
+    if today > expiration_date:
+        st.error(f"このアプリケーションの利用期限（{expiration_date.strftime('%Y年%m月%d日')}）は終了しました。")
+        st.info("ご利用ありがとうございました。")
+        st.stop()  # ここでアプリの処理を完全に停止する
+        
     st.title("🎙️ 音声文字起こし＆要約Email送信アプリ")
 
     # 最初に一度だけsession_stateを初期化
