@@ -18,7 +18,7 @@ try:
     BREVO_PORT = int(st.secrets["BREVO_PORT"])
     BREVO_USER = st.secrets["BREVO_USER"]
     BREVO_PASSWORD = st.secrets["BREVO_PASSWORD"]
-    BREVO_SENDER = st.secrets("BREVO_SENDER") # 送信元アドレスを登録＆指定が必要
+    BREVO_SENDER = st.secrets["BREVO_SENDER"] # 送信元アドレスを登録＆指定が必要
 except (KeyError, FileNotFoundError):
     # ローカル開発用のフォールバック
     from dotenv import load_dotenv
