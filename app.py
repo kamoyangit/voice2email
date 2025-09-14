@@ -7,6 +7,7 @@ from email.mime.multipart import MIMEMultipart
 from audiorecorder import audiorecorder
 import io
 from datetime import date # dateを扱うためにインポート
+import hashlib # importの追加
 
 # --- 1. 初期設定 & 環境変数読み込み ---
 
@@ -49,8 +50,15 @@ def initialize_session_state():
         st.session_state.transcribed_text = ""
     if "summary_text" not in st.session_state:
         st.session_state.summary_text = ""
-    if "last_audio_bytes" not in st.session_state:
-        st.session_state.last_audio_bytes = None
+    if "last_audio_hash" not in st.session_state:      # ← 追加
+        st.session_state.last_audio_hash = None        # ← 追加
+
+# 3. 録音データのハッシュを取得するヘルパー
+def get_audio_hash(audio_segment):
+    """AudioSegment を WAV にエクスポートし、SHA‑256 ハッシュ文字列を返す"""
+    buf = io.BytesIO()
+    audio_segment.export(buf, format="wav")
+    return hashlib.sha256(buf.getvalue()).hexdigest()
     
 # 修正箇所: transcribe_audio 関数
 def transcribe_audio(audio_segment):
@@ -76,12 +84,11 @@ def transcribe_audio(audio_segment):
 
 
 def summarize_text(text):
-    """GPT-4o miniを使ってテキストを要約する"""
-    # 注: 仕様書のgpt-4.1-nanoは存在しないため、最新の小型高速モデルgpt-4o-miniを使用します。
+    """gpt-4.1-nanoを使ってテキストを要約する"""
     try:
         with st.spinner("GPTがテキストを要約中です..."):
             response = openai.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-4.1-nano",
                 messages=[
                     {"role": "system", "content": "あなたはプロの編集者です。受け取ったテキストを簡潔で分かりやすい箇条書きの要約にしてください。"},
                     {"role": "user", "content": text}
@@ -170,45 +177,56 @@ def main_app():
     # ★★★ ここからが修正の核心部分 ★★★
     if audio_segment is not None and len(audio_segment) > 0:
         # 現在の音声データのバイト列表現を取得
-        current_audio_bytes = audio_segment.raw_data
+        current_hash = get_audio_hash(audio_segment)
 
-        # 前回の音声データと異なる（＝新しい録音が行われた）場合のみ、文字起こしを実行
-        if current_audio_bytes != st.session_state.last_audio_bytes:
-            st.info("新しい音声を検出しました。文字起こしを開始します...")
+        # 前回とハッシュが違う＝新しい録音が検出されたときのみ実行
+        if st.session_state.last_audio_hash != current_hash:
+            st.info("新しい音声を検出しました。文字起こし → 要約 → Email送信を開始します…")
             
-            # 文字起こしを実行
-            st.session_state.transcribed_text = transcribe_audio(audio_segment)
-            
-            # 新しい文字起こしなので、古い要約結果はリセット
-            st.session_state.summary_text = ""
-            
-            # 今回の音声データを「前回分」として保存
-            st.session_state.last_audio_bytes = current_audio_bytes
-            
-            # UIを即座に更新するためにスクリプトを再実行
+            # ① **前回の結果をクリア**（ここで追加）
+            st.session_state.transcribed_text = ""
+            st.session_state.summary_text   = ""
+
+            # ② 文字起こし
+            trans_text = transcribe_audio(audio_segment)
+            st.session_state.transcribed_text = trans_text
+
+            # ③ 要約（失敗したら空文字）
+            if trans_text.strip():
+                summary = summarize_text(trans_text)
+                st.session_state.summary_text = summary
+            else:
+                st.warning("文字起こしが失敗しました。")
+                st.session_state.summary_text = ""
+
+            # ④ Email送信
+            if email_to and st.session_state.summary_text.strip():
+                subject = "【自動送信】音声メモの要約"
+                send_email(email_to, subject,
+                           st.session_state.summary_text, BREVO_SENDER)
+            else:
+                st.warning("メールアドレスが未入力、または要約が空です。")
+
+            # ハッシュを更新
+            st.session_state.last_audio_hash = current_hash
+
+            # UI を即座にリフレッシュ
             st.rerun()
+    else:
+        # 録音が終了していない／何も録音されていない場合はフラグをリセット
+        st.session_state.processing_done = False
 
     # --- 文字起こし結果表示 ---
     st.subheader("3. 文字起こし結果")
     st.text_area("結果", value=st.session_state.transcribed_text, height=200, key="transcribed_display")
 
-    # --- 要約実行 ---
-    st.subheader("4. テキストを要約")
-    if st.button("要約する", disabled=not st.session_state.transcribed_text):
-        st.session_state.summary_text = summarize_text(st.session_state.transcribed_text)
-        # 要約ボタンが押された後、UIを即時更新するために再実行
-        st.rerun()
-    
+    # --- 要約・送信ボタンは削除したので、要約テキストとメール送信の表示だけに ---
+    st.subheader("4. 要約結果")
     st.text_area("要約結果", value=st.session_state.summary_text, height=200, key="summary_display")
     
-    # --- Email送信 ---
-    st.subheader("5. 要約をEmailで送信")
-    if st.button("送信する", disabled=not st.session_state.summary_text or not email_to):
-        if not email_to:
-            st.warning("Emailの送り先を入力してください。")
-        else:
-            email_subject = "【自動送信】音声メモの要約"
-            send_email(email_to, email_subject, st.session_state.summary_text, BREVO_SENDER)
+    # --- 5. Email送信（自動実行済みなら「完了」メッセージを表示） ---
+    if st.session_state.last_audio_hash:
+        st.success("録音 → 文字起こし → 要約 → Email送信が完了しました！")
 
 # --- 5. アプリケーション実行 ---
 
