@@ -6,7 +6,8 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from audiorecorder import audiorecorder
 import io
-from datetime import date # dateを扱うためにインポート
+# from datetime import date # dateを扱うためにインポート
+from datetime import date, datetime, timezone, timedelta
 import hashlib # importの追加
 
 # --- 1. 初期設定 & 環境変数読み込み ---
@@ -139,11 +140,15 @@ def check_password():
 
 # 修正箇所: main_app 関数の中
 def main_app():
-    # 1. 利用期限を設定 (2025年9月30日)
-    expiration_date = date(2025, 9, 30)
+    # 1. 利用期限を設定 (2025年10月10日)
+    expiration_date = date(2025, 10, 10)
     
     # 2. 今日の日付を取得
-    today = date.today()
+    # today = date.today()
+    # 2. JSTを取得して、その値から、日付だけを抜き取る
+    JST = timezone(timedelta(hours=9), name='JST')
+    now_jst = datetime.now(JST)
+    today = now_jst.date()
     
     # 3. 今日の日付が利用期限を過ぎていないかチェック
     if today > expiration_date:
